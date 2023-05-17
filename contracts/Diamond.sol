@@ -20,10 +20,12 @@ contract Diamond {
     ///@param _implementation address of facet
     function addSelector(bytes4 _selector, address _implementation) external {
         LibDiamond.DiamondStorage storage ds = LibDiamond.diamondStorage();
+        uint256 selectorCount = ds.selector.length;
         require(ds.owner == msg.sender, "not owner");
-        address facet = ds.facetAddress[_selector];
+        address facet = ds.facetAddressAndSelectorPosition[_selector].facetAddress;
         require(facet == address(0), "function selector already exist");
-        ds.facetAddress[_selector] = _implementation;
+        ds.facetAddressAndSelectorPosition[_selector] = LibDiamond.FacetAddressAndSelectorPosition(_implementation, selectorCount);
+        ds.selector.push(_selector);
         emit DiamondCut(_selector, _implementation, "Add");
     }
 
@@ -33,12 +35,19 @@ contract Diamond {
     function removeSelector(bytes4 _selector) external {
         LibDiamond.DiamondStorage storage ds = LibDiamond.diamondStorage();
         require(ds.owner == msg.sender, "not owner");
-        address facet = ds.facetAddress[_selector];
-        if(facet == address(0)) {
+        LibDiamond.FacetAddressAndSelectorPosition memory facetAndPosition = ds.facetAddressAndSelectorPosition[_selector];
+        if(facetAndPosition.facetAddress == address(0)) {
             revert FunctionNotFound(_selector);
         }
-        delete ds.facetAddress[_selector];
-        emit DiamondCut(_selector, facet, "Remove");
+        uint256 selectorCount = ds.selector.length - 1;
+        if(ds.facetAddressAndSelectorPosition[_selector].selectorPosition != selectorCount){
+            bytes4 lastSelector = ds.selector[selectorCount];
+            ds.selector[facetAndPosition.selectorPosition] = lastSelector;
+            ds.facetAddressAndSelectorPosition[lastSelector].selectorPosition = facetAndPosition.selectorPosition;
+        }
+        ds.selector.pop();
+        delete ds.facetAddressAndSelectorPosition[_selector];
+        emit DiamondCut(_selector, facetAndPosition.facetAddress, "Remove");
     }
 
     ///@dev replace _selector from old facet to _implementation facet
@@ -47,11 +56,11 @@ contract Diamond {
     function replaceSelector(bytes4 _selector, address _implementation) external {
         LibDiamond.DiamondStorage storage ds = LibDiamond.diamondStorage();
         require(ds.owner == msg.sender, "not owner");
-        address facet = ds.facetAddress[_selector];
+        address facet = ds.facetAddressAndSelectorPosition[_selector].facetAddress;
         if(facet == address(0)) {
             revert FunctionNotFound(_selector);
         }
-        ds.facetAddress[_selector] = _implementation;
+        ds.facetAddressAndSelectorPosition[_selector].facetAddress = _implementation;
         emit DiamondCut(_selector, _implementation, "Replace");
     }
 
@@ -59,7 +68,7 @@ contract Diamond {
     // function if a facet is found and return any value.
     fallback() external payable {
         LibDiamond.DiamondStorage storage ds = LibDiamond.diamondStorage();
-        address facet = ds.facetAddress[msg.sig];
+        address facet = ds.facetAddressAndSelectorPosition[msg.sig].facetAddress;
         if(facet == address(0)) {
             revert FunctionNotFound(msg.sig);
         }
